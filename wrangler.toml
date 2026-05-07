@@ -1,0 +1,9 @@
+name = "ira-worker"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+[placement]
+mode = "smart"
+
+[assets]
+directory = "./public"

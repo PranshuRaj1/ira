@@ -1,8 +1,22 @@
 import { Hono } from 'hono'
+import { neon } from '@neondatabase/serverless'
+import { upsertUser, saveMemory, getRelevantMemories, pruneDecayedMemories } from './memory/store'
 
-   const app = new Hono<{ Bindings: { BOT_TOKEN: string } }>()
 
-   app.post('/webhook', async (c) => {
+
+interface Env {
+  DATABASE_URL: string
+  TELEGRAM_BOT_TOKEN: string
+}
+type Bindings = {
+  BOT_TOKEN: string
+  DATABASE_URL: string   // add this
+}
+
+const app = new Hono<{ Bindings: { BOT_TOKEN: string,DATABASE_URL: string } }>()
+
+
+app.post('/webhook', async (c) => {
      const body = await c.req.json()
      const message = body?.message
      if (!message) return c.json({ ok: true })
