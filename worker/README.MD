@@ -31,6 +31,7 @@ CREATE TABLE memories (
   last_accessed TIMESTAMPTZ DEFAULT NOW(),
   created_at    TIMESTAMPTZ DEFAULT NOW(),
   decay_rate    FLOAT       DEFAULT 0.1,
+  tier          TEXT        NOT NULL DEFAULT 'general_fact',
   tags          TEXT[],
   embedding     vector(768)
 );

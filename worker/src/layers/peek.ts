@@ -1,9 +1,11 @@
 import { classifyIntent } from '../chat'
+import { ImportanceTier } from '../types'
 
 export type PeekResult = {
   intent: 'question' | 'statement' | 'command' | 'greeting' | 'other'
   shouldSaveMemory: boolean
   memoryHint: string | null
+  tier: ImportanceTier
   ms: number
 }
 

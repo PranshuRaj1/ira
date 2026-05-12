@@ -1,4 +1,5 @@
 import { groqChat } from './groq'
+import { ImportanceTier, TIER_CONFIG } from './types'
 
 export async function generateResponse(
   userMessage: string,
@@ -30,6 +31,7 @@ export async function classifyIntent(message: string): Promise<{
   intent: 'question' | 'statement' | 'command' | 'greeting' | 'other'
   shouldSaveMemory: boolean
   memoryHint: string | null
+  tier: ImportanceTier
 }> {
   const messages = [
     {
@@ -38,27 +40,45 @@ export async function classifyIntent(message: string): Promise<{
     },
     {
       role: 'user' as const,
-      content: `Classify this message:
+      content: `Classify the message into exactly one importance tier:
+- "core_identity"     — name, age, location, job, family, nationality
+- "strong_preference" — favourite things, hobbies, strong opinions, beliefs  
+- "general_fact"      — things mentioned casually, soft preferences
+- "temporary_context" — current mood, what they're doing today, one-time events
+- "trivial"           — greetings, filler, acknowledgements
+
 {
   "intent": "question|statement|command|greeting|other",
   "shouldSaveMemory": true/false,
-  "memoryHint": "concise fact to remember, or null"
+  "memoryHint": "concise fact to remember, or null",
+  "tier": "core_identity|strong_preference|general_fact|temporary_context|trivial"
 }
-
-Save memory only if message reveals something personal about the user (name, preference, job, location etc).
 
 Message: "${message}"`
     }
   ]
 
-  const raw = await groqChat(messages, 100, 0)
+  const raw = await groqChat(messages, 150, 0)
   try {
     const clean = raw.replace(/```json|```/g, '').trim()
-    return JSON.parse(clean)
-  } catch {
-    // If Groq returns a rate limit error or malformed JSON, skip memory save
-    console.warn("classifyIntent parse failed, raw was:", raw)
-    return { intent: 'other', shouldSaveMemory: false, memoryHint: null }
+    const parsed = JSON.parse(clean)
+    
+    if (!TIER_CONFIG[parsed.tier as ImportanceTier]) {
+      throw new Error(`Unknown tier: ${parsed.tier}`)
+    }
+    
+    return parsed
+  } catch (err) {
+    // log it so you know classification is failing
+    console.error('Classification parse failed:', err, 'raw:', raw)
+
+    // degrade to general_fact, not a magic number
+    return {
+      intent: 'other',
+      shouldSaveMemory: false,
+      memoryHint: null,
+      tier: 'general_fact' as ImportanceTier
+    }
   }
 }
 

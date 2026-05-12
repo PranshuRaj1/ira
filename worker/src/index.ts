@@ -80,7 +80,8 @@ app.post('/webhook', async (c) => {
         c.env.DATABASE_URL,
         userId,
         peek.memoryHint,
-        embedding
+        embedding,
+        peek.tier
       )
     }
 

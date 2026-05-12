@@ -1,5 +1,6 @@
 import { neon } from '@neondatabase/serverless'
 import { resolveContradictions } from './contradiction'
+import { ImportanceTier, TIER_CONFIG } from '../types'
 
 export type Memory = {
   id: string
@@ -31,16 +32,21 @@ export async function saveMemory(
   userId: string,
   content: string,
   embedding: number[],
+  tier: ImportanceTier = 'general_fact',
   tags: string[] = []
 ): Promise<void> {
   const sql = neon(dbUrl)
+  const config = TIER_CONFIG[tier]
   await sql`
-    INSERT INTO memories (user_id, content, embedding, tags)
+    INSERT INTO memories (user_id, content, embedding, tags, importance, decay_rate, tier)
     VALUES (
       ${userId},
       ${content},
       ${JSON.stringify(embedding)}::vector,
-      ${tags}
+      ${tags},
+      ${config.importance},
+      ${config.decayRate},
+      ${tier}
     )
   `
 }
@@ -116,22 +122,27 @@ export async function saveMemoryWithContradictionCheck(
   userId: string,
   content: string,
   embedding: number[],
+  tier: ImportanceTier = 'general_fact',
   tags: string[] = []
 ): Promise<void> {
   const sql = neon(dbUrl)
+  const config = TIER_CONFIG[tier]
 
   await sql`
-    INSERT INTO memories (user_id, content, embedding, tags)
+    INSERT INTO memories (user_id, content, embedding, tags, importance, decay_rate, tier)
     VALUES (
       ${userId},
       ${content},
       ${JSON.stringify(embedding)}::vector,
-      ${tags}
+      ${tags},
+      ${config.importance},
+      ${config.decayRate},
+      ${tier}
     )
   `
 
   const similar = await sql`
-    SELECT id, content
+    SELECT id, content, importance, decay_rate, tier
     FROM memories
     WHERE user_id = ${userId}
     AND content != ${content}
@@ -144,7 +155,8 @@ export async function saveMemoryWithContradictionCheck(
       dbUrl,
       userId,
       content,
-      similar.map(r => ({ id: r.id, content: r.content }))
+      tier,
+      similar.map(r => ({ id: r.id, content: r.content, importance: r.importance, tier: r.tier }))
     )
   }
 
