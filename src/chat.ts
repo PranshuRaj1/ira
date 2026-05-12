@@ -52,8 +52,14 @@ Message: "${message}"`
   ]
 
   const raw = await groqChat(messages, 100, 0)
-  const clean = raw.replace(/```json|```/g, '').trim()
-  return JSON.parse(clean)
+  try {
+    const clean = raw.replace(/```json|```/g, '').trim()
+    return JSON.parse(clean)
+  } catch {
+    // If Groq returns a rate limit error or malformed JSON, skip memory save
+    console.warn("classifyIntent parse failed, raw was:", raw)
+    return { intent: 'other', shouldSaveMemory: false, memoryHint: null }
+  }
 }
 
 export async function askYesNo(question: string): Promise<boolean> {
