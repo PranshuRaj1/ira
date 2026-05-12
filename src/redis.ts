@@ -1,11 +1,8 @@
 export class Redis {
-  constructor(
-    private url: string,
-    private token: string
-  ) {}
+  constructor(private url: string, private token: string) {}
 
   private async cmd(...args: unknown[]) {
-    const res = await fetch(`${this.url}`, {
+    const res = await fetch(this.url, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.token}`,
@@ -17,7 +14,6 @@ export class Redis {
     return data.result
   }
 
-  // Session storage
   async setSession(userId: string, session: object, ttlSeconds = 3600) {
     await this.cmd('SET', `session:${userId}`, JSON.stringify(session), 'EX', ttlSeconds)
   }
@@ -27,7 +23,6 @@ export class Redis {
     return raw ? JSON.parse(raw) as T : null
   }
 
-  // Metrics — store last 1000 latency values per layer
   async pushMetric(layer: 'peek' | 'mesh' | 'silk', ms: number) {
     await this.cmd('LPUSH', `metrics:${layer}`, ms)
     await this.cmd('LTRIM', `metrics:${layer}`, 0, 999)
@@ -38,13 +33,10 @@ export class Redis {
     return raw.map(Number)
   }
 
-  // Rate limiting — max N requests per minute per user
   async checkRateLimit(userId: string, maxPerMinute = 20): Promise<boolean> {
     const key = `ratelimit:${userId}:${Math.floor(Date.now() / 60000)}`
     const count = await this.cmd('INCR', key) as number
-    if (count === 1) {
-      await this.cmd('EXPIRE', key, 60)  // expire after 1 minute
-    }
-    return count <= maxPerMinute  // true = allowed
+    if (count === 1) await this.cmd('EXPIRE', key, 60)
+    return count <= maxPerMinute
   }
 }

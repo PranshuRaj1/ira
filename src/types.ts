@@ -4,6 +4,6 @@ export type SessionMessage = {
 }
 
 export type Session = {
-  history: SessionMessage[]   // last 10 turns
-  lastActive: string          // ISO timestamp
+  history: SessionMessage[]
+  lastActive: string
 }

@@ -1,4 +1,5 @@
 import { neon } from '@neondatabase/serverless'
+import { resolveContradictions } from './contradiction'
 
 export type Memory = {
   id: string
@@ -97,3 +98,43 @@ export async function pruneDecayedMemories(
     ) < ${threshold}
   `
 }
+
+export async function saveMemoryWithContradictionCheck(
+  dbUrl: string,
+  userId: string,
+  content: string,
+  embedding: number[],
+  tags: string[] = []
+): Promise<void> {
+  const sql = neon(dbUrl)
+
+  await sql`
+    INSERT INTO memories (user_id, content, embedding, tags)
+    VALUES (
+      ${userId},
+      ${content},
+      ${JSON.stringify(embedding)}::vector,
+      ${tags}
+    )
+  `
+
+  const similar = await sql`
+    SELECT id, content
+    FROM memories
+    WHERE user_id = ${userId}
+    AND content != ${content}
+    AND embedding <=> ${JSON.stringify(embedding)}::vector < 0.15
+    LIMIT 5
+  `
+
+  if (similar.length > 0) {
+    await resolveContradictions(
+      dbUrl,
+      userId,
+      content,
+      similar.map(r => ({ id: r.id, content: r.content }))
+    )
+  }
+
+  await pruneDecayedMemories(dbUrl, userId)
+}
