@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { cors } from 'hono/cors'
 import { neon } from '@neondatabase/serverless'
 import { Redis } from './redis'
 import { initGroqKeys } from './groq'
@@ -21,6 +22,8 @@ type Bindings = {
 }
 
 const app = new Hono<{ Bindings: Bindings }>()
+
+app.use('/*', cors())
 
 app.get('/', (c) => c.text('IRA is running'))
 
@@ -105,6 +108,22 @@ app.post('/webhook', async (c) => {
   }
 
   return c.json({ ok: true })
+})
+
+app.get('/memories', async (c) => {
+  const sql = neon(c.env.DATABASE_URL)
+  const rows = await sql`
+    SELECT 
+      user_id, content, importance, access_count,
+      last_accessed, created_at,
+      importance * EXP(
+        -decay_rate * EXTRACT(EPOCH FROM (NOW() - last_accessed)) / 86400
+      ) AS decayed_importance
+    FROM memories
+    ORDER BY decayed_importance DESC
+    LIMIT 50
+  `
+  return c.json({ memories: rows })
 })
 
 app.get('/metrics', async (c) => {
