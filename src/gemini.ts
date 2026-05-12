@@ -11,7 +11,8 @@ export async function embed(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'models/gemini-embedding-2',
-        content: { parts: [{ text }] }
+        content: { parts: [{ text }] },
+        output_dimensionality: 768
       })
     }
   )
