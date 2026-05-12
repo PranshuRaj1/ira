@@ -53,12 +53,24 @@ export async function getRelevantMemories(
 ): Promise<Memory[]> {
   const sql = neon(dbUrl)
   const rows = await sql`
-    SELECT
-      id, user_id, content, importance, access_count,
-      last_accessed, created_at, decay_rate, tags
-    FROM memories
-    WHERE user_id = ${userId}
-    ORDER BY embedding <=> ${JSON.stringify(queryEmbedding)}::vector
+    WITH candidates AS (
+      SELECT
+        id, user_id, content, importance, access_count,
+        last_accessed, created_at, decay_rate, tags,
+        importance * EXP(
+          -decay_rate *
+          EXTRACT(EPOCH FROM (NOW() - last_accessed)) / 86400.0
+        ) AS decayed_importance,
+        (1 - (embedding <=> ${JSON.stringify(queryEmbedding)}::vector)) AS similarity
+      FROM memories
+      WHERE user_id = ${userId}
+      ORDER BY embedding <=> ${JSON.stringify(queryEmbedding)}::vector
+      LIMIT 50
+    )
+    SELECT *
+    FROM candidates
+    WHERE decayed_importance > 0.05
+    ORDER BY (similarity * decayed_importance) DESC
     LIMIT ${limit}
   `
 

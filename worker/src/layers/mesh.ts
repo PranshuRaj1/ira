@@ -1,6 +1,5 @@
 import { embed } from '../gemini'
 import { getRelevantMemories } from '../memory/store'
-import { rankByDecay } from '../memory/decay'
 import type { Memory } from '../memory/store'
 
 export type MeshResult = {
@@ -17,8 +16,7 @@ export async function runMeshLayer(
   const t0 = Date.now()
 
   const queryEmbedding = await embed(geminiApiKey, message)
-  const rawMemories = await getRelevantMemories(dbUrl, userId, queryEmbedding, 10)
-  const ranked = rankByDecay(rawMemories).slice(0, 5)
+  const memories = await getRelevantMemories(dbUrl, userId, queryEmbedding, 5)
 
-  return { memories: ranked, ms: Date.now() - t0 }
+  return { memories, ms: Date.now() - t0 }
 }
