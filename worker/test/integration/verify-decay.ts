@@ -1,6 +1,6 @@
 const path = require('path');
 const { neon } = require('@neondatabase/serverless');
-require('dotenv').config({ path: path.join(__dirname, '.dev.vars') });
+require('dotenv').config({ path: path.join(__dirname, '../../.dev.vars') });
 
 if (!process.env.DATABASE_URL) {
   console.error(" Error: DATABASE_URL not found in .dev.vars");
@@ -38,6 +38,7 @@ async function verify() {
         ) AS decayed_importance
       FROM memories
       WHERE user_id = ${userId}
+      AND is_archived = false
       ORDER BY embedding <=> ${JSON.stringify(queryEmbedding)}::vector
       LIMIT 50
     )

@@ -12,7 +12,12 @@ export type Memory = {
   createdAt: Date
   decayRate: number
   tags: string[]
+  isArchived?: boolean
+  archivedAt?: Date
+  archivedReason?: string
+  decayScoreAtArchive?: number
 }
+
 
 export async function upsertUser(
   dbUrl: string,
@@ -70,6 +75,7 @@ export async function getRelevantMemories(
         (1 - (embedding <=> ${JSON.stringify(queryEmbedding)}::vector)) AS similarity
       FROM memories
       WHERE user_id = ${userId}
+      AND is_archived = false
       ORDER BY embedding <=> ${JSON.stringify(queryEmbedding)}::vector
       LIMIT 50
     )
@@ -99,7 +105,63 @@ export async function getRelevantMemories(
     createdAt: new Date(r.created_at),
     decayRate: r.decay_rate,
     tags: r.tags ?? [],
+    isArchived: r.is_archived,
   }))
+}
+
+export async function deepRecallMemories(
+  dbUrl: string,
+  userId: string,
+  queryEmbedding: number[],
+  limit = 5
+): Promise<Memory[]> {
+  const sql = neon(dbUrl)
+  const rows = await sql`
+    SELECT
+      id, user_id, content, importance, access_count,
+      last_accessed, created_at, decay_rate, tags,
+      decay_score_at_archive,
+      archived_at,
+      is_archived,
+      archived_reason
+    FROM memories
+    WHERE user_id = ${userId}
+      AND is_archived = true
+      AND archived_reason = 'decay'
+    ORDER BY (1 - (embedding <=> ${JSON.stringify(queryEmbedding)}::vector)) DESC
+    LIMIT ${limit}
+  `
+
+  return rows.map(r => ({
+    id: r.id,
+    userId: r.user_id,
+    content: r.content,
+    importance: r.importance,
+    accessCount: r.access_count,
+    lastAccessed: new Date(r.last_accessed),
+    createdAt: new Date(r.created_at),
+    decayRate: r.decay_rate,
+    tags: r.tags ?? [],
+    isArchived: r.is_archived,
+    archivedAt: r.archived_at ? new Date(r.archived_at) : undefined,
+    archivedReason: r.archived_reason,
+    decayScoreAtArchive: r.decay_score_at_archive,
+  }))
+}
+
+export async function resurface(dbUrl: string, memoryId: string): Promise<void> {
+  const sql = neon(dbUrl)
+  await sql`
+    UPDATE memories
+    SET
+      is_archived  = false,
+      archived_at  = NULL,
+      archived_reason = NULL,
+      decay_score_at_archive = NULL,
+      importance   = LEAST(importance * 2, 1.0),
+      last_accessed = NOW()
+    WHERE id = ${memoryId}
+  `
 }
 
 export async function pruneDecayedMemories(
@@ -109,11 +171,19 @@ export async function pruneDecayedMemories(
 ): Promise<void> {
   const sql = neon(dbUrl)
   await sql`
-    DELETE FROM memories
+    UPDATE memories
+    SET
+      is_archived            = true,
+      archived_at            = NOW(),
+      archived_reason        = 'decay',
+      decay_score_at_archive = (importance * EXP(
+        -decay_rate * EXTRACT(EPOCH FROM (NOW() - last_accessed)) / 86400
+      ))
     WHERE user_id = ${userId}
-    AND importance * EXP(
-      -decay_rate * EXTRACT(EPOCH FROM (NOW() - last_accessed)) / 86400
-    ) < ${threshold}
+      AND is_archived = false
+      AND importance * EXP(
+        -decay_rate * EXTRACT(EPOCH FROM (NOW() - last_accessed)) / 86400
+      ) < ${threshold}
   `
 }
 
@@ -145,6 +215,7 @@ export async function saveMemoryWithContradictionCheck(
     SELECT id, content, importance, decay_rate, tier
     FROM memories
     WHERE user_id = ${userId}
+    AND is_archived = false
     AND content != ${content}
     AND embedding <=> ${JSON.stringify(embedding)}::vector < 0.15
     LIMIT 5

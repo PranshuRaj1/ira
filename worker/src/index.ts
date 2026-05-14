@@ -121,6 +121,7 @@ app.get('/memories', async (c) => {
         -decay_rate * EXTRACT(EPOCH FROM (NOW() - last_accessed)) / 86400
       ) AS decayed_importance
     FROM memories
+    WHERE is_archived = false
     ORDER BY decayed_importance DESC
     LIMIT 50
   `
