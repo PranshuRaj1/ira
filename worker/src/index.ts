@@ -8,6 +8,8 @@ import { upsertUser } from './memory/store'
 import { saveMemoryWithContradictionCheck } from './memory/store'
 import { DECAY_SCORE_EXPR } from './lib/decay'
 import { withTimeout, CircuitBreaker, TIMEOUTS } from './lib/resilience'
+import { consolidateMemories, rollbackConsolidation } from './lib/consolidation'
+import { promoteMemories } from './lib/promotion'
 import { runPeekLayer } from './layers/peek'
 import { runMeshLayer } from './layers/mesh'
 import { runSilkLayer } from './layers/silk'
@@ -23,6 +25,7 @@ type Bindings = {
   GEMINI_API_KEY: string
   GROQ_API_KEY_1: string
   GROQ_API_KEY_2: string
+  DEBUG_SECRET: string
 }
 
 // ── Safe fallbacks when a layer times out or circuit trips ──────
@@ -257,4 +260,61 @@ async function sendTelegram(token: string, chatId: number, text: string) {
   }
 }
 
-export default app
+// ── Admin endpoints ─────────────────────────────────────────────
+
+app.post('/admin/rollback-consolidation', async (c) => {
+  const secret = c.req.header('x-debug-secret')
+  if (secret !== c.env.DEBUG_SECRET) return c.json({ error: 'unauthorized' }, 401)
+
+  const { consolidationId } = await c.req.json<{ consolidationId: string }>()
+  if (!consolidationId) return c.json({ error: 'consolidationId required' }, 400)
+
+  await rollbackConsolidation(c.env.DATABASE_URL, consolidationId)
+  return c.json({ ok: true, rolledBack: consolidationId })
+})
+
+// ── Cloudflare Worker exports ────────────────────────────────────
+
+// Sleep cycle cron — runs daily at 3 AM UTC
+// Configure in wrangler.toml: [triggers] crons = ["0 3 * * *"]
+async function runSleepCycle(env: Bindings): Promise<void> {
+  const sql = neon(env.DATABASE_URL)
+
+  // Only process users active in the last 7 days
+  const users = await sql`
+    SELECT DISTINCT user_id
+    FROM memories
+    WHERE last_accessed >= NOW() - INTERVAL '7 days'
+      AND is_archived   = false
+  `
+
+  console.log(`[sleep-cycle] processing ${users.length} active users`)
+
+  for (const { user_id } of users) {
+    try {
+      // Promote first — freshly promoted memories become eligible
+      // for consolidation at their new tier in the same cycle.
+      const promoted = await promoteMemories(env.DATABASE_URL, user_id)
+
+      const result = await consolidateMemories(
+        env.DATABASE_URL,
+        env.GEMINI_API_KEY,
+        user_id
+      )
+
+      console.log(`[sleep-cycle] user=${user_id}`, { promoted, ...result })
+    } catch (err) {
+      console.error(`[sleep-cycle] failed for user=${user_id}:`, err)
+    }
+  }
+}
+
+export default {
+  // HTTP routes (Hono app)
+  fetch: app.fetch,
+
+  // Cron trigger — Cloudflare calls this on the schedule in wrangler.toml
+  async scheduled(_event: ScheduledEvent, env: Bindings, ctx: ExecutionContext) {
+    ctx.waitUntil(runSleepCycle(env))
+  },
+}

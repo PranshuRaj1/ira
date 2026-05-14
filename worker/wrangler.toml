@@ -7,3 +7,6 @@ mode = "smart"
 
 [assets]
 directory = "./public"
+
+[triggers]
+crons = ["0 3 * * *"]   # Daily at 3 AM UTC — memory sleep cycle
