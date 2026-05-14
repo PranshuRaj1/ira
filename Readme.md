@@ -1,0 +1,1 @@
+IRA (Intelligent Retrieval Assistant) is an advanced, memory-augmented AI bot designed to act as a highly personalized assistant. Unlike standard AI chatbots (like ChatGPT) that forget everything once a conversation ends, IRA is designed to build a long-term understanding of who you are, what you like, and what you've discussed in the past.
