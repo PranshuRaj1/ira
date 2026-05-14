@@ -15,6 +15,7 @@
 
 import { neon } from '@neondatabase/serverless'
 import { embed } from '../gemini'
+import { groqChat } from '../groq'
 import {
   clusterMemories,
   CandidateMemory,
@@ -37,13 +38,10 @@ type SynthesisResult = {
  * Returns null if the response is low-confidence, malformed, or timed out.
  */
 async function synthesizeCluster(
-  geminiApiKey: string,
+  geminiApiKey: string, // Kept for embedding, but synthesis uses Groq
   memories: CandidateMemory[]
 ): Promise<SynthesisResult | null> {
   const facts = memories.map((m, i) => `${i + 1}. ${m.content}`).join('\n')
-
-  const controller = new AbortController()
-  const timeout    = setTimeout(() => controller.abort(), 8_000)
 
   const prompt = `You are a memory consolidation system for a personal AI assistant.
 Given these related memory fragments about the same user, synthesize them into one concise insight.
@@ -61,26 +59,10 @@ JSON format (exactly):
 {"summary":"...","tier":"general_fact|strong_preference|core_identity","confidence":0.0}`
 
   try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`,
-      {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 200 }
-        }),
-        signal: controller.signal,
-      }
-    )
+    const raw = await groqChat([
+      { role: 'user', content: prompt }
+    ], 200, 0.1) // Low temperature for stability
 
-    const data = await res.json() as any
-    if (data.error) {
-      console.error('[consolidation] Gemini synthesis error:', data.error.message)
-      return null
-    }
-
-    const raw  = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
     if (!raw) return null
 
     const parsed = JSON.parse(raw) as SynthesisResult
@@ -94,15 +76,9 @@ JSON format (exactly):
     if (!validTiers.includes(parsed.tier)) parsed.tier = 'general_fact'
 
     return parsed
-  } catch (err: any) {
-    if (err?.name === 'AbortError') {
-      console.error('[consolidation] synthesizeCluster timed out after 8s')
-    } else {
-      console.error('[consolidation] synthesizeCluster failed:', err)
-    }
+  } catch (err) {
+    console.error('[consolidation] Groq synthesis failed:', err)
     return null
-  } finally {
-    clearTimeout(timeout)
   }
 }
 

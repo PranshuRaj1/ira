@@ -57,7 +57,7 @@ export async function promoteMemories(
             SET
               tier       = ${rule.to},
               decay_rate = ${rule.newDecayRate},
-              updated_at = NOW()
+              last_accessed = NOW()
             WHERE id = ${memory.id}
           `,
           sql`
