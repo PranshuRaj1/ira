@@ -1,6 +1,9 @@
-const path = require('path');
-const { neon } = require('@neondatabase/serverless');
-require('dotenv').config({ path: path.join(__dirname, '../../.dev.vars') });
+import path from 'path';
+import { neon } from '@neondatabase/serverless';
+import dotenv from 'dotenv';
+import { DECAY_SCORE_EXPR, DECAY_THRESHOLD } from '../../src/lib/decay';
+
+dotenv.config({ path: path.join(__dirname, '../../.dev.vars') });
 
 if (!process.env.DATABASE_URL) {
   console.error(" Error: DATABASE_URL not found in .dev.vars");
@@ -48,14 +51,10 @@ async function testDeepRecall() {
       is_archived            = true,
       archived_at            = NOW(),
       archived_reason        = 'decay',
-      decay_score_at_archive = (importance * EXP(
-        -decay_rate * EXTRACT(EPOCH FROM (NOW() - last_accessed)) / 86400
-      ))
+      decay_score_at_archive = (${sql.unsafe(DECAY_SCORE_EXPR())})
     WHERE user_id = ${userId}
       AND is_archived = false
-      AND importance * EXP(
-        -decay_rate * EXTRACT(EPOCH FROM (NOW() - last_accessed)) / 86400
-      ) < 0.05
+      AND ${sql.unsafe(DECAY_SCORE_EXPR())} < ${DECAY_THRESHOLD}
     RETURNING id, decay_score_at_archive, is_archived
   `;
   console.log(`✓ Pruned ${pruneResult.length} memories.`);

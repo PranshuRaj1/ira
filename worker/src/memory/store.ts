@@ -1,6 +1,7 @@
 import { neon } from '@neondatabase/serverless'
 import { resolveContradictions } from './contradiction'
 import { ImportanceTier, TIER_CONFIG } from '../types'
+import { DECAY_SCORE_EXPR, DECAY_THRESHOLD } from '../lib/decay'
 
 export type Memory = {
   id: string
@@ -17,6 +18,8 @@ export type Memory = {
   archivedReason?: string
   decayScoreAtArchive?: number
 }
+
+
 
 
 export async function upsertUser(
@@ -68,10 +71,7 @@ export async function getRelevantMemories(
       SELECT
         id, user_id, content, importance, access_count,
         last_accessed, created_at, decay_rate, tags,
-        importance * EXP(
-          -decay_rate *
-          EXTRACT(EPOCH FROM (NOW() - last_accessed)) / 86400.0
-        ) AS decayed_importance,
+        ${sql.unsafe(DECAY_SCORE_EXPR())} AS decayed_importance,
         (1 - (embedding <=> ${JSON.stringify(queryEmbedding)}::vector)) AS similarity
       FROM memories
       WHERE user_id = ${userId}
@@ -81,7 +81,7 @@ export async function getRelevantMemories(
     )
     SELECT *
     FROM candidates
-    WHERE decayed_importance > 0.05
+    WHERE decayed_importance > ${DECAY_THRESHOLD}
     ORDER BY (similarity * decayed_importance) DESC
     LIMIT ${limit}
   `
@@ -92,6 +92,7 @@ export async function getRelevantMemories(
       UPDATE memories
       SET last_accessed = NOW(), access_count = access_count + 1
       WHERE id = ANY(${ids})
+        AND is_archived = false
     `
   }
 
@@ -159,7 +160,8 @@ export async function resurface(dbUrl: string, memoryId: string): Promise<void> 
       archived_reason = NULL,
       decay_score_at_archive = NULL,
       importance   = LEAST(importance * 2, 1.0),
-      last_accessed = NOW()
+      last_accessed = NOW(),
+      access_count = access_count + 1
     WHERE id = ${memoryId}
   `
 }
@@ -167,7 +169,7 @@ export async function resurface(dbUrl: string, memoryId: string): Promise<void> 
 export async function pruneDecayedMemories(
   dbUrl: string,
   userId: string,
-  threshold = 0.05
+  threshold = DECAY_THRESHOLD
 ): Promise<void> {
   const sql = neon(dbUrl)
   await sql`
@@ -176,14 +178,10 @@ export async function pruneDecayedMemories(
       is_archived            = true,
       archived_at            = NOW(),
       archived_reason        = 'decay',
-      decay_score_at_archive = (importance * EXP(
-        -decay_rate * EXTRACT(EPOCH FROM (NOW() - last_accessed)) / 86400
-      ))
+      decay_score_at_archive = (${sql.unsafe(DECAY_SCORE_EXPR())})
     WHERE user_id = ${userId}
       AND is_archived = false
-      AND importance * EXP(
-        -decay_rate * EXTRACT(EPOCH FROM (NOW() - last_accessed)) / 86400
-      ) < ${threshold}
+      AND ${sql.unsafe(DECAY_SCORE_EXPR())} < ${threshold}
   `
 }
 

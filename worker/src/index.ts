@@ -6,6 +6,7 @@ import { initGroqKeys } from './groq'
 import { embed } from './gemini'
 import { upsertUser } from './memory/store'
 import { saveMemoryWithContradictionCheck } from './memory/store'
+import { DECAY_SCORE_EXPR } from './lib/decay'
 import { runPeekLayer } from './layers/peek'
 import { runMeshLayer } from './layers/mesh'
 import { runSilkLayer } from './layers/silk'
@@ -117,9 +118,7 @@ app.get('/memories', async (c) => {
     SELECT 
       user_id, content, importance, access_count,
       last_accessed, created_at,
-      importance * EXP(
-        -decay_rate * EXTRACT(EPOCH FROM (NOW() - last_accessed)) / 86400
-      ) AS decayed_importance
+      ${sql.unsafe(DECAY_SCORE_EXPR())} AS decayed_importance
     FROM memories
     WHERE is_archived = false
     ORDER BY decayed_importance DESC

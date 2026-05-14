@@ -1,6 +1,9 @@
-const path = require('path');
-const { neon } = require('@neondatabase/serverless');
-require('dotenv').config({ path: path.join(__dirname, '../../.dev.vars') });
+import path from 'path';
+import { neon } from '@neondatabase/serverless';
+import dotenv from 'dotenv';
+import { DECAY_SCORE_EXPR } from '../../src/lib/decay';
+
+dotenv.config({ path: path.join(__dirname, '../../.dev.vars') });
 
 if (!process.env.DATABASE_URL) {
   console.error(" Error: DATABASE_URL not found in .dev.vars");
@@ -31,11 +34,9 @@ async function verify() {
   const results = await sql`
     WITH candidates AS (
       SELECT
-        id, content, importance, last_accessed,
+        id, content, importance, last_accessed, access_count,
         (1 - (embedding <=> ${JSON.stringify(queryEmbedding)}::vector)) AS similarity,
-        importance * EXP(
-          -decay_rate * EXTRACT(EPOCH FROM (NOW() - last_accessed)) / 86400.0
-        ) AS decayed_importance
+        ${sql.unsafe(DECAY_SCORE_EXPR())} AS decayed_importance
       FROM memories
       WHERE user_id = ${userId}
       AND is_archived = false
