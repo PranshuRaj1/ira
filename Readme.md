@@ -36,3 +36,7 @@ importance * EXP(
 )
 
 0.005 means even the most-recalled memory will fully decay in roughly 530 days without access. Adjust this constant to match your product's memory horizon.
+
+
+MEMORY CONSOLIDATION:
+Cosine similarity is a mathematical way to measure how similar two vectors are based on their direction.

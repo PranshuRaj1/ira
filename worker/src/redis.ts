@@ -33,6 +33,32 @@ export class Redis {
     return raw.map(Number)
   }
 
+  async get(key: string): Promise<string | null> {
+    return await this.cmd('GET', key) as string | null
+  }
+
+  async setRaw(key: string, value: string, ttlSeconds?: number): Promise<void> {
+    if (ttlSeconds) {
+      await this.cmd('SET', key, value, 'EX', ttlSeconds)
+    } else {
+      await this.cmd('SET', key, value)
+    }
+  }
+
+  async incr(key: string, ttlSeconds?: number): Promise<number> {
+    const count = await this.cmd('INCR', key) as number
+    if (ttlSeconds && count === 1) {
+      await this.cmd('EXPIRE', key, ttlSeconds)
+    }
+    return count
+  }
+
+  async del(...keys: string[]): Promise<void> {
+    if (keys.length > 0) {
+      await this.cmd('DEL', ...keys)
+    }
+  }
+
   async checkRateLimit(userId: string, maxPerMinute = 20): Promise<boolean> {
     const key = `ratelimit:${userId}:${Math.floor(Date.now() / 60000)}`
     const count = await this.cmd('INCR', key) as number
