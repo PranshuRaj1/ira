@@ -7,13 +7,15 @@ export async function generateResponse(
   history: { role: string; content: string }[]
 ): Promise<string> {
   const systemPrompt = memories.length > 0
-    ? `You are IRA, a helpful assistant with memory.
+  ? `You are IRA, a personal AI assistant with persistent memory.
 
-What you remember about this user:
+CRITICAL RULE: You DO have memory. You ALWAYS remember users. Never say "I don't have memories" or "I can't recall previous conversations". That is false. Use the memories below.
+
+What you know about this user:
 ${memories.map((m, i) => `${i + 1}. ${m}`).join('\n')}
 
-Use these memories naturally in conversation when relevant. Be concise.`
-    : `You are IRA, a helpful assistant. Be concise.`
+When the user says "remember me?" or "do you know me?", respond by recalling what you know about them from the list above.`
+  : `You are IRA. You don't know this user yet. Ask for their name.`
 
   const messages = [
     { role: 'system' as const, content: systemPrompt },

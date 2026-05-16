@@ -59,6 +59,41 @@ export async function saveMemory(
   `
 }
 
+/**
+ * Always fetch the user's core_identity memories (name, age, location, etc)
+ * directly by tier — bypasses vector similarity competition entirely.
+ * These are pinned into every prompt regardless of the current query.
+ */
+export async function getPinnedIdentityMemories(
+  dbUrl: string,
+  userId: string
+): Promise<Memory[]> {
+  const sql = neon(dbUrl)
+  const rows = await sql`
+    SELECT
+      id, user_id, content, importance, access_count,
+      last_accessed, created_at, decay_rate, tags,
+      ${sql.unsafe(DECAY_SCORE_EXPR())} AS decayed_importance
+    FROM memories
+    WHERE user_id = ${userId}
+      AND tier = 'core_identity'
+      AND is_archived = false
+    ORDER BY decayed_importance DESC
+    LIMIT 5
+  `
+  return rows.map(r => ({
+    id: r.id,
+    userId: r.user_id,
+    content: r.content,
+    importance: r.importance,
+    accessCount: r.access_count,
+    lastAccessed: new Date(r.last_accessed),
+    createdAt: new Date(r.created_at),
+    decayRate: r.decay_rate,
+    tags: r.tags ?? [],
+  }))
+}
+
 export async function getRelevantMemories(
   dbUrl: string,
   userId: string,
