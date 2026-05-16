@@ -13,7 +13,7 @@ import { Redis } from '../redis'
 // This is for now until i get the right latency for each layer and p50 , p90 , p99
 export const TIMEOUTS = {
   PEEK_LAYER:  1000,
-  MESH_LAYER:  800,
+  MESH_LAYER:  4000,
   SILK_LAYER:  3000,
   TELEGRAM:    2000,
 } as const

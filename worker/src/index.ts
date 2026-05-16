@@ -28,6 +28,11 @@ type Bindings = {
   DEBUG_SECRET: string
 }
 
+// ── Module-level cached Neon client ─────────────────────────────
+// Reused across requests in the same warm worker instance.
+// Prevents creating a new client (and new TCP handshake) on every request.
+let _sql: ReturnType<typeof neon> | null = null
+
 // ── Safe fallbacks when a layer times out or circuit trips ──────
 
 const PEEK_FALLBACK: PeekResult = {
@@ -52,7 +57,7 @@ app.use('/*', cors())
 
 app.get('/', (c) => c.text('IRA is running'))
 
-// ── Webhook (Change 7: instant 200 via waitUntil) ───────────────
+// ── Webhook (instant 200 via waitUntil) ─────────────────────────
 
 app.post('/webhook', async (c) => {
   const body = await c.req.json()
@@ -104,13 +109,11 @@ async function processMessage(body: any, env: Bindings): Promise<void> {
       lastActive: new Date().toISOString()
     }
 
-    // ── Circuit breakers (Change 6: state persisted in Upstash) ──
+    // ── Circuit breakers ──────────────────────────────────────────
     const groqBreaker   = new CircuitBreaker(redis, 'groq')
     const geminiBreaker = new CircuitBreaker(redis, 'gemini')
 
-    // ── Run Peek + Mesh in parallel with timeouts (Change 5) ─────
-    // Breaker wraps withTimeout — so a timeout returns fallback cleanly
-    // without recording a false failure on the breaker.
+    // ── Run Peek + Mesh in parallel with timeouts ─────────────────
     const [peek, mesh] = await Promise.all([
       groqBreaker.call(
         () => withTimeout(
@@ -273,10 +276,9 @@ app.post('/admin/rollback-consolidation', async (c) => {
   return c.json({ ok: true, rolledBack: consolidationId })
 })
 
-// ── Cloudflare Worker exports ────────────────────────────────────
+// ── Sleep cycle cron ─────────────────────────────────────────────
+// Runs daily at 3 AM UTC via wrangler.jsonc cron trigger
 
-// Sleep cycle cron — runs daily at 3 AM UTC
-// Configure in wrangler.toml: [triggers] crons = ["0 3 * * *"]
 async function runSleepCycle(env: Bindings): Promise<void> {
   const sql = neon(env.DATABASE_URL)
 
@@ -309,11 +311,24 @@ async function runSleepCycle(env: Bindings): Promise<void> {
   }
 }
 
-export default {
-  // HTTP routes (Hono app)
-  fetch: app.fetch,
+// ── Cloudflare Worker exports ────────────────────────────────────
 
-  // Cron trigger — Cloudflare calls this on the schedule in wrangler.toml
+export default {
+  // HTTP routes — wrap app.fetch to add connection warmup
+  fetch(request: Request, env: Bindings, ctx: ExecutionContext) {
+    // Warmup: fire SELECT 1 without awaiting to start the Neon TCP
+    // handshake immediately on request arrival. By the time the Mesh
+    // layer actually queries the DB, the connection is already warm.
+    // Using a module-level cached client avoids creating a new instance
+    // (and new handshake) on every single request.
+    if (env.DATABASE_URL) {
+      if (!_sql) _sql = neon(env.DATABASE_URL)
+      _sql`SELECT 1`.catch(() => {})
+    }
+    return app.fetch(request, env, ctx)
+  },
+
+  // Cron trigger — Cloudflare calls this on the schedule in wrangler.jsonc
   async scheduled(_event: ScheduledEvent, env: Bindings, ctx: ExecutionContext) {
     ctx.waitUntil(runSleepCycle(env))
   },
