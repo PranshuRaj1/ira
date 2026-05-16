@@ -43,3 +43,5 @@ If the application uses Durable Objects or Workflows, refer to the relevant best
 
 # REMEMBER 
 Do not read .dev.vars , it contains sensitive information.
+DO NOT DEPLOY YOURSELF
+wrangler worker name is "worker" 

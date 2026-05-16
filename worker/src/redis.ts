@@ -14,7 +14,10 @@ export class Redis {
     return data.result
   }
 
-  async setSession(userId: string, session: object, ttlSeconds = 3600) {
+  // TTL is refreshed on every message — 24h means a user can return the
+  // next day and still have in-context history. Old 1h TTL caused "amnesia"
+  // mid-conversation for sessions longer than an hour.
+  async setSession(userId: string, session: object, ttlSeconds = 86400) {
     await this.cmd('SET', `session:${userId}`, JSON.stringify(session), 'EX', ttlSeconds)
   }
 

@@ -4,7 +4,7 @@
  */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "ira-worker",
+	"name": "worker",
 	"main": "src/index.ts",
 	"compatibility_date": "2024-01-01",
 	"compatibility_flags": [
