@@ -42,10 +42,19 @@ export async function classifyIntent(message: string): Promise<{
       role: 'user' as const,
       content: `Classify the message into exactly one importance tier:
 - "core_identity"     — name, age, location, job, family, nationality
-- "strong_preference" — favourite things, hobbies, strong opinions, beliefs  
+- "strong_preference" — favourite things, hobbies, strong opinions, beliefs
 - "general_fact"      — things mentioned casually, soft preferences
 - "temporary_context" — current mood, what they're doing today, one-time events
-- "trivial"           — greetings, filler, acknowledgements
+- "trivial"           — greetings, filler, acknowledgements with NO factual content
+
+CRITICAL RULE: Any message that contains or reveals a person's name — even short
+sentences like "I'm Prem", "my name is Pranshu", or "call me Alex" — MUST be
+classified as "core_identity" with shouldSaveMemory: true. Never classify a
+name-introduction as "trivial" or "general_fact".
+
+Example:
+Message: "I'm Prem"
+Output: {"intent":"statement","shouldSaveMemory":true,"memoryHint":"user's name is Prem","tier":"core_identity"}
 
 {
   "intent": "question|statement|command|greeting|other",

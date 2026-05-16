@@ -70,7 +70,7 @@ export async function getRelevantMemories(
     WITH candidates AS (
       SELECT
         id, user_id, content, importance, access_count,
-        last_accessed, created_at, decay_rate, tags,
+        last_accessed, created_at, decay_rate, tags, tier,
         ${sql.unsafe(DECAY_SCORE_EXPR())} AS decayed_importance,
         (1 - (embedding <=> ${JSON.stringify(queryEmbedding)}::vector)) AS similarity
       FROM memories
@@ -82,7 +82,10 @@ export async function getRelevantMemories(
     SELECT *
     FROM candidates
     WHERE decayed_importance > ${DECAY_THRESHOLD}
-    ORDER BY (similarity * decayed_importance) DESC
+    ORDER BY (
+      similarity * decayed_importance *
+      (CASE WHEN tier = 'core_identity' THEN 2.0 ELSE 1.0 END)
+    ) DESC
     LIMIT ${limit}
   `
 

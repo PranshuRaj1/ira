@@ -106,6 +106,7 @@ export async function fetchCandidates(
       AND memory_type            = 'source'
       AND is_consolidated_source = false
       AND tier                   IN ('general_fact', 'strong_preference')
+      AND tier                  != 'core_identity'
       AND access_count           >= ${MIN_ACCESS_COUNT}
       AND last_accessed          >= NOW() - INTERVAL '1 day' * ${CONSOLIDATION_WINDOW_DAYS}
     ORDER BY access_count DESC
