@@ -38,7 +38,6 @@ type SynthesisResult = {
  * Returns null if the response is low-confidence, malformed, or timed out.
  */
 async function synthesizeCluster(
-  geminiApiKey: string, // Kept for embedding, but synthesis uses Groq
   memories: CandidateMemory[]
 ): Promise<SynthesisResult | null> {
   const facts = memories.map((m, i) => `${i + 1}. ${m.content}`).join('\n')
@@ -162,7 +161,7 @@ export async function consolidateMemories(
   const consolidationId = crypto.randomUUID()
 
   for (const cluster of clusters) {
-    const synthesis = await synthesizeCluster(geminiApiKey, cluster)
+    const synthesis = await synthesizeCluster(cluster)
     if (!synthesis) {
       skipped++
       continue
@@ -189,7 +188,7 @@ export async function consolidateMemories(
           INSERT INTO memories (
             user_id, content, importance, tier, decay_rate,
             access_count, source_memory_ids, consolidation_id,
-            memory_type, embedding
+            memory_type, embedding, source
           ) VALUES (
             ${userId},
             ${synthesis.summary},
@@ -200,7 +199,8 @@ export async function consolidateMemories(
             ${sourceIds},
             ${consolidationId},
             'consolidated',
-            ${JSON.stringify(embedding)}::vector
+            ${JSON.stringify(embedding)}::vector,
+            'system'
           )
         `,
         sql`

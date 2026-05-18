@@ -41,12 +41,16 @@ export async function saveMemory(
   content: string,
   embedding: number[],
   tier: ImportanceTier = 'general_fact',
-  tags: string[] = []
+  tags: string[] = [],
+  source: 'user' | 'system' = 'user'
 ): Promise<void> {
+  if (tier === 'core_identity' && source !== 'system') {
+    throw new Error("Security Violation: core_identity memories can only be written by system source.")
+  }
   const sql = neon(dbUrl)
   const config = TIER_CONFIG[tier]
   await sql`
-    INSERT INTO memories (user_id, content, embedding, tags, importance, decay_rate, tier)
+    INSERT INTO memories (user_id, content, embedding, tags, importance, decay_rate, tier, source)
     VALUES (
       ${userId},
       ${content},
@@ -54,7 +58,8 @@ export async function saveMemory(
       ${tags},
       ${config.importance},
       ${config.decayRate},
-      ${tier}
+      ${tier},
+      ${source}
     )
   `
 }
@@ -229,13 +234,17 @@ export async function saveMemoryWithContradictionCheck(
   content: string,
   embedding: number[],
   tier: ImportanceTier = 'general_fact',
-  tags: string[] = []
+  tags: string[] = [],
+  source: 'user' | 'system' = 'user'
 ): Promise<void> {
+  if (tier === 'core_identity' && source !== 'system') {
+    throw new Error("Security Violation: core_identity memories can only be written by system source.")
+  }
   const sql = neon(dbUrl)
   const config = TIER_CONFIG[tier]
 
   await sql`
-    INSERT INTO memories (user_id, content, embedding, tags, importance, decay_rate, tier)
+    INSERT INTO memories (user_id, content, embedding, tags, importance, decay_rate, tier, source)
     VALUES (
       ${userId},
       ${content},
@@ -243,7 +252,8 @@ export async function saveMemoryWithContradictionCheck(
       ${tags},
       ${config.importance},
       ${config.decayRate},
-      ${tier}
+      ${tier},
+      ${source}
     )
   `
 
@@ -268,4 +278,45 @@ export async function saveMemoryWithContradictionCheck(
   }
 
   await pruneDecayedMemories(dbUrl, userId)
+}
+
+export async function logAdversarialAttempt(
+  dbUrl: string,
+  userId: string,
+  message: string,
+  attackType = 'general_adversarial'
+): Promise<void> {
+  const sql = neon(dbUrl)
+  await sql`
+    INSERT INTO security_log (user_id, message, attack_type)
+    VALUES (${userId}, ${message}, ${attackType})
+  `
+}
+
+export const FORBIDDEN_MEMORY_PATTERNS = [
+  /\badmin\b/i,
+  /\belevated\s+privileges?\b/i,
+  /\btrust\s+tiers?\b/i,
+  /\bskip\s+peek\b/i,
+  /\bsystem\s+overrides?\b/i,
+  /\broot\s+users?\b/i,
+  /\bclassification\s+layers?\b/i,
+  /\bunrestricted\s+access\b/i,
+  /\bpin\b.*\bidentity\b/i
+]
+
+export function isMemorySafe(memoryHint: string): boolean {
+  return !FORBIDDEN_MEMORY_PATTERNS.some(pattern => pattern.test(memoryHint))
+}
+
+export async function logSuspiciousMemoryAttempt(
+  dbUrl: string,
+  userId: string,
+  memoryHint: string
+): Promise<void> {
+  const sql = neon(dbUrl)
+  await sql`
+    INSERT INTO suspicious_memory_attempts (user_id, memory_hint)
+    VALUES (${userId}, ${memoryHint})
+  `
 }

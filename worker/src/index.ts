@@ -1,11 +1,10 @@
-import { Hono } from 'hono'
+import { Hono, Context } from 'hono'
 import { cors } from 'hono/cors'
 import { neon } from '@neondatabase/serverless'
 import { Redis } from './redis'
 import { initGroqKeys } from './groq'
 import { embed } from './gemini'
-import { upsertUser } from './memory/store'
-import { saveMemoryWithContradictionCheck } from './memory/store'
+import { upsertUser, saveMemoryWithContradictionCheck, logAdversarialAttempt, isMemorySafe, logSuspiciousMemoryAttempt } from './memory/store'
 import { DECAY_SCORE_EXPR } from './lib/decay'
 import { withTimeout, CircuitBreaker, TIMEOUTS } from './lib/resilience'
 import { consolidateMemories, rollbackConsolidation } from './lib/consolidation'
@@ -13,6 +12,7 @@ import { promoteMemories } from './lib/promotion'
 import { runPeekLayer } from './layers/peek'
 import { runMeshLayer } from './layers/mesh'
 import { runSilkLayer } from './layers/silk'
+import { sanitizeMessageForContext, detectAttackType } from './lib/sanitization'
 import type { PeekResult } from './layers/peek'
 import type { MeshResult } from './layers/mesh'
 import type { Session } from './types'
@@ -41,6 +41,7 @@ const PEEK_FALLBACK: PeekResult = {
   memoryHint: null,
   tier: 'trivial',
   ms: 0,
+  adversarialFlag: false,
 }
 
 const MESH_FALLBACK: MeshResult = {
@@ -80,7 +81,8 @@ async function processMessage(body: any, env: Bindings): Promise<void> {
     const message = body?.message
     const chatId = message.chat.id
     const userId = String(chatId)
-    const text   = message.text as string
+    const rawText = message.text as string
+    const text   = sanitizeMessageForContext(rawText)
 
     // Init Groq key rotation (using 2 keys as requested)
     initGroqKeys(
@@ -117,7 +119,7 @@ async function processMessage(body: any, env: Bindings): Promise<void> {
     const [peek, mesh] = await Promise.all([
       groqBreaker.call(
         () => withTimeout(
-          runPeekLayer(text),
+          runPeekLayer(rawText),
           TIMEOUTS.PEEK_LAYER,
           PEEK_FALLBACK,
           'peek-layer'
@@ -137,6 +139,19 @@ async function processMessage(body: any, env: Bindings): Promise<void> {
       ),
     ])
 
+    if (peek.adversarialFlag) {
+      await recordAdversarialStrike(redis, userId)
+      const attackType = detectAttackType(rawText)
+      await logAdversarialAttempt(env.DATABASE_URL, userId, rawText, attackType)
+      await withTimeout(
+        sendTelegram(env.BOT_TOKEN, chatId, "I noticed that message was trying to change how I work. I'm still just IRA. What did you actually want to talk about?"),
+        TIMEOUTS.TELEGRAM,
+        undefined,
+        'telegram-send'
+      )
+      return
+    }
+
     // Silk runs after both — also with a timeout
     const silk = await groqBreaker.call(
       () => withTimeout(
@@ -151,17 +166,30 @@ async function processMessage(body: any, env: Bindings): Promise<void> {
 
     // Save memory if Peek flagged it (non-critical, best-effort)
     if (peek.shouldSaveMemory && peek.memoryHint) {
-      try {
-        const embedding = await embed(env.GEMINI_API_KEY, peek.memoryHint)
-        await saveMemoryWithContradictionCheck(
-          env.DATABASE_URL,
-          userId,
-          peek.memoryHint,
-          embedding,
-          peek.tier
-        )
-      } catch (err) {
-        console.error('Memory save failed (non-critical):', err)
+      if (isMemorySafe(peek.memoryHint)) {
+        try {
+          const embedding = await embed(env.GEMINI_API_KEY, peek.memoryHint)
+          // User message path is restricted: only system can write core_identity.
+          // Therefore, if it is core_identity from the user path, we downgrade to strong_preference.
+          const tier = peek.tier === 'core_identity' ? 'strong_preference' : peek.tier
+          await saveMemoryWithContradictionCheck(
+            env.DATABASE_URL,
+            userId,
+            peek.memoryHint,
+            embedding,
+            tier,
+            [],
+            'user'
+          )
+        } catch (err) {
+          console.error('Memory save failed (non-critical):', err)
+        }
+      } else {
+        try {
+          await logSuspiciousMemoryAttempt(env.DATABASE_URL, userId, peek.memoryHint)
+        } catch (err) {
+          console.error('Logging suspicious memory failed:', err)
+        }
       }
     }
 
@@ -202,6 +230,11 @@ async function processMessage(body: any, env: Bindings): Promise<void> {
       }
     } catch { /* swallow — nothing more we can do */ }
   }
+}
+
+function requireDebugSecret(c: Context<{ Bindings: Bindings }>): boolean {
+  const secret = c.req.header('x-debug-secret')
+  return secret === c.env.DEBUG_SECRET
 }
 
 // ── Dashboard endpoints ─────────────────────────────────────────
@@ -266,8 +299,7 @@ async function sendTelegram(token: string, chatId: number, text: string) {
 // ── Admin endpoints ─────────────────────────────────────────────
 
 app.post('/admin/rollback-consolidation', async (c) => {
-  const secret = c.req.header('x-debug-secret')
-  if (secret !== c.env.DEBUG_SECRET) return c.json({ error: 'unauthorized' }, 401)
+  if (!requireDebugSecret(c)) return c.json({ error: 'unauthorized' }, 401)
 
   const { consolidationId } = await c.req.json<{ consolidationId: string }>()
   if (!consolidationId) return c.json({ error: 'consolidationId required' }, 400)
@@ -309,6 +341,25 @@ async function runSleepCycle(env: Bindings): Promise<void> {
       console.error(`[sleep-cycle] failed for user=${user_id}:`, err)
     }
   }
+}
+
+async function recordAdversarialStrike(redis: Redis, userId: string): Promise<void> {
+  const session = await redis.getSession<Session>(userId) ?? {
+    history: [],
+    lastActive: new Date().toISOString()
+  }
+  
+  const now = Date.now()
+  let strikes = session.adversarialStrikes || 0
+  
+  // TTL-based reset: If 24 hours have passed since last adversarial hit, decay strikes to 0
+  if (session.lastAdversarialAt && now - session.lastAdversarialAt > 24 * 60 * 60 * 1000) {
+    strikes = 0
+  }
+  
+  session.adversarialStrikes = Math.min(strikes + 1, 99)
+  session.lastAdversarialAt = now
+  await redis.setSession(userId, session)
 }
 
 // ── Cloudflare Worker exports ────────────────────────────────────

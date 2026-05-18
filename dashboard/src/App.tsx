@@ -36,17 +36,25 @@ export default function App() {
     const pollMetrics = async () => {
       try {
         const res = await fetch(`${WORKER_URL}/metrics`)
+        if (!res.ok) {
+          console.error('Metrics fetch returned non-ok response', res.status)
+          return
+        }
         const data = await res.json() as any
-        setTotal(data.totalRequests)
-        setHistory(prev => [...prev.slice(-30), {
-          time: new Date().toLocaleTimeString(),
-          peekP50: data.peek.p50,
-          meshP50: data.mesh.p50,
-          silkP50: data.silk.p50,
-          peekP90: data.peek.p90,
-          meshP90: data.mesh.p90,
-          silkP90: data.silk.p90,
-        }])
+        if (data && data.peek && data.mesh && data.silk) {
+          setTotal(data.totalRequests || 0)
+          setHistory(prev => [...prev.slice(-30), {
+            time: new Date().toLocaleTimeString(),
+            peekP50: data.peek.p50 ?? 0,
+            meshP50: data.mesh.p50 ?? 0,
+            silkP50: data.silk.p50 ?? 0,
+            peekP90: data.peek.p90 ?? 0,
+            meshP90: data.mesh.p90 ?? 0,
+            silkP90: data.silk.p90 ?? 0,
+          }])
+        } else {
+          console.error('Metrics fetch returned invalid shape', data)
+        }
       } catch (e) {
         console.error('Metrics fetch failed', e)
       }
@@ -62,8 +70,16 @@ export default function App() {
     const pollMemories = async () => {
       try {
         const res = await fetch(`${WORKER_URL}/memories`)
+        if (!res.ok) {
+          console.error('Memories fetch returned non-ok response', res.status)
+          return
+        }
         const data = await res.json() as any
-        setMemories(data.memories)
+        if (data && Array.isArray(data.memories)) {
+          setMemories(data.memories)
+        } else {
+          console.error('Memories fetch returned invalid shape', data)
+        }
       } catch (e) {
         console.error('Memories fetch failed', e)
       }
@@ -182,7 +198,7 @@ export default function App() {
       {activeTab === 'memories' && (
         <div style={{ background: '#111', borderRadius: 12, padding: 24 }}>
           <h2 style={{ margin: '0 0 16px', color: '#aaa', fontSize: 16 }}>
-            Stored Memories ({memories.length})
+            Stored Memories ({(memories || []).length})
           </h2>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
@@ -196,7 +212,7 @@ export default function App() {
               </tr>
             </thead>
             <tbody>
-              {memories.map((m, i) => (
+              {(memories || []).map((m, i) => (
                 <tr key={i} style={{ borderBottom: '1px solid #1a1a1a' }}>
                   <td style={{ padding: '10px 12px', color: '#fff', maxWidth: 300 }}>{m.content}</td>
                   <td style={{ padding: '10px 12px', color: '#888' }}>{m.user_id}</td>
@@ -224,7 +240,7 @@ export default function App() {
                   </td>
                 </tr>
               ))}
-              {memories.length === 0 && (
+              {(!memories || memories.length === 0) && (
                 <tr>
                   <td colSpan={6} style={{ padding: 32, textAlign: 'center', color: '#555' }}>
                     No memories yet. Send your bot a message first.

@@ -2,11 +2,12 @@ import { classifyIntent } from '../chat'
 import { ImportanceTier } from '../types'
 
 export type PeekResult = {
-  intent: 'question' | 'statement' | 'command' | 'greeting' | 'other'
+  intent: 'question' | 'statement' | 'command' | 'greeting' | 'other' | 'adversarial'
   shouldSaveMemory: boolean
   memoryHint: string | null
   tier: ImportanceTier
   ms: number
+  adversarialFlag?: boolean
 }
 
 export async function runPeekLayer(message: string): Promise<PeekResult> {

@@ -19,7 +19,7 @@ export async function runSilkLayer(
   const response = await generateResponse(
     message,
     mesh.memories.map(m => m.content),
-    session.history
+    session
   )
 
   return { response, ms: Date.now() - t0 }
