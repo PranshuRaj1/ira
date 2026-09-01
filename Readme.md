@@ -5,6 +5,8 @@
 **Talk to IRA on Telegram:** [@ira_memory_bot](http://t.me/ira_memory_bot)  
 **Dashboard (internal):** [ira-dashboard.pages.dev](https://ira-dashboard.pages.dev/)
 
+Built by [Pranshu Raj](https://github.com/PranshuRaj1). Read the [IRA architecture and debugging case study](https://pranshuraj.vercel.app/projects/ira) on the portfolio.
+
 ---
 
 ## Table of Contents
